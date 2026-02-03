@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zoning Land Use Planner</title>
+
+    <!-- Mapbox CSS -->
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; }
+        #map { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div id="app" class="h-screen flex flex-col">
+        <!-- Header -->
+        <header class="bg-blue-600 text-white shadow-lg">
+            <div class="max-w-7xl mx-auto px-4 py-4">
+                <div class="flex items-center gap-3 mb-4">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <h1 class="text-2xl font-bold">Zoning Land Use Planner</h1>
+                </div>
+                <div class="max-w-2xl">
+                    <form id="searchForm" class="w-full">
+                        <div class="relative">
+                            <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                            </svg>
+                            <input
+                                type="text"
+                                id="searchInput"
+                                placeholder="Search by address or parcel ID..."
+                                class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                            />
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex overflow-hidden">
+            <!-- Map -->
+            <div class="flex-1 relative">
+                <div id="map"></div>
+
+                <!-- Loading Indicator -->
+                <div id="loading" class="hidden absolute top-4 left-1/2 transform -translate-x-1/2 bg-white px-4 py-2 rounded-lg shadow-lg">
+                    Loading...
+                </div>
+
+                <!-- Error Message -->
+                <div id="error" class="hidden absolute top-4 left-1/2 transform -translate-x-1/2 bg-red-100 text-red-700 px-4 py-2 rounded-lg shadow-lg">
+                </div>
+            </div>
+
+            <!-- Comparison Panel -->
+            <div id="comparisonPanel" class="hidden w-full md:w-96 lg:w-[500px] bg-gray-50 overflow-y-auto p-4 border-l">
+                <div id="comparisonContent"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Mapbox JS -->
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.js"></script>
+
+    <script>
+        // ===== CONFIGURATION =====
+        const MAPBOX_TOKEN = 'YOUR_MAPBOX_TOKEN_HERE'; // <-- PUT YOUR TOKEN HERE
+        const API_URL = 'http://localhost:3000/api';
+
+        // ===== STATE =====
+        let map = null;
+        let parcels = [];
+        let selectedParcel = null;
+
+        // ===== INITIALIZE MAP =====
+        function initMap() {
+            mapboxgl.accessToken = MAPBOX_TOKEN;
+
+            map = new mapboxgl.Map({
+                container: 'map',
+                style: 'mapbox://styles/mapbox/streets-v12',
+                center: [-98.5795, 39.8283], // Center of US
+                zoom: 4
+            });
+
+            map.on('load', () => {
+                console.log('Map loaded successfully');
+            });
+        }
+
+        // ===== API CALLS =====
+        async function searchParcels(query) {
+            const response = await fetch(`${API_URL}/parcels/search?query=${encodeURIComponent(query)}`);
+            if (!response.ok) throw new Error('Search failed');
+            return response.json();
+        }
+
+        async function getParcelComparison(parcelId) {
+            const response = await fetch(`${API_URL}/parcels/${parcelId}/compare`);
+            if (!response.ok) throw new Error('Comparison failed');
+            return response.json();
+        }
+
+        // ===== UI UPDATES =====
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('hidden', !show);
+        }
+
+        function showError(message) {
+            const errorEl = document.getElementById('error');
+            if (message) {
+                errorEl.textContent = message;
+                errorEl.classList.remove('hidden');
+                setTimeout(() => errorEl.classList.add('hidden'), 5000);
+            } else {
+                errorEl.classList.add('hidden');
+            }
+        }
+
+        function updateMap(parcelsData) {
+            if (!map || parcelsData.length === 0) return;
+
+            const geojson = {
+                type: 'FeatureCollection',
+                features: parcelsData.map(parcel => ({
+                    type: 'Feature',
+                    geometry: parcel.geometry,
+                    properties: {
+                        id: parcel.id,
+                        parcel_id: parcel.parcel_id,
+                        address: parcel.address,
+                        current_zoning: parcel.current_zoning,
+                        future_land_use: parcel.future_land_use,
+                        zoning_matches: parcel.current_zoning === parcel.future_land_use
+                    }
+                }))
+            };
+
+            if (map.getSource('parcels')) {
+                map.getSource('parcels').setData(geojson);
+            } else {
+                map.addSource('parcels', {
+                    type: 'geojson',
+                    data: geojson
+                });
+
+                map.addLayer({
+                    id: 'parcels-fill',
+                    type: 'fill',
+                    source: 'parcels',
+                    paint: {
+                        'fill-color': [
+                            'case',
+                            ['get', 'zoning_matches'],
+                            '#10b981',
+                            '#ef4444'
+                        ],
+                        'fill-opacity': 0.5
+                    }
+                });
+
+                map.addLayer({
+                    id: 'parcels-outline',
+                    type: 'line',
+                    source: 'parcels',
+                    paint: {
+                        'line-color': '#ffffff',
+                        'line-width': 2
+                    }
+                });
+
+                map.on('click', 'parcels-fill', (e) => {
+                    const parcelId = e.features[0].properties.id;
+                    const parcel = parcels.find(p => p.id === parcelId);
+                    if (parcel) handleParcelClick(parcel);
+                });
+
+                map.on('mouseenter', 'parcels-fill', () => {
+                    map.getCanvas().style.cursor = 'pointer';
+                });
+
+                map.on('mouseleave', 'parcels-fill', () => {
+                    map.getCanvas().style.cursor = '';
+                });
+            }
+
+            // Fit bounds to show all parcels
+            const bounds = new mapboxgl.LngLatBounds();
+            parcelsData.forEach(parcel => {
+                if (parcel.geometry.type === 'Polygon') {
+                    parcel.geometry.coordinates[0].forEach(coord => {
+                        bounds.extend(coord);
+                    });
+                }
+            });
+            map.fitBounds(bounds, { padding: 50 });
+        }
+
+        function showComparison(comparison) {
+            const panel = document.getElementById('comparisonPanel');
+            const content = document.getElementById('comparisonContent');
+
+            const { parcel, zoning_matches, potential_issues } = comparison;
+            const matchClass = zoning_matches ? 'bg-green-50 border-green-200 text-green-900' : 'bg-red-50 border-red-200 text-red-900';
+            const iconColor = zoning_matches ? 'text-green-600' : 'text-red-600';
+
+            content.innerHTML = `
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <div class="mb-4">
+                        <h2 class="text-2xl font-bold text-gray-900">${parcel.address || 'Unknown Address'}</h2>
+                        <p class="text-sm text-gray-600">Parcel ID: ${parcel.parcel_id}</p>
+                        ${parcel.acreage ? `<p class="text-sm text-gray-600">Acreage: ${parcel.acreage}</p>` : ''}
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div class="border rounded-lg p-4">
+                            <h3 class="text-sm font-semibold text-gray-500 mb-2">Current Zoning</h3>
+                            <p class="text-lg font-bold text-gray-900">${parcel.current_zoning}</p>
+                        </div>
+                        <div class="border rounded-lg p-4">
+                            <h3 class="text-sm font-semibold text-gray-500 mb-2">Future Land Use</h3>
+                            <p class="text-lg font-bold text-gray-900">${parcel.future_land_use}</p>
+                        </div>
+                    </div>
+
+                    <div class="${matchClass} rounded-lg p-4 border">
+                        <h4 class="font-semibold mb-2">
+                            ${zoning_matches ? '✓ Zoning Matches Future Land Use' : '✗ Zoning Does Not Match Future Land Use'}
+                        </h4>
+                        <p class="text-sm">
+                            ${zoning_matches
+                                ? 'No zoning changes required. Current zoning aligns with future land use plans.'
+                                : 'Rezoning may be required to align with future land use plans.'}
+                        </p>
+                    </div>
+
+                    ${potential_issues && potential_issues.length > 0 ? `
+                        <div class="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                            <h4 class="font-semibold text-amber-900 mb-2">⚠ Potential Issues</h4>
+                            <ul class="list-disc list-inside space-y-1">
+                                ${potential_issues.map(issue => `<li class="text-sm text-amber-700">${issue}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+
+                    ${parcel.owner ? `
+                        <div class="mt-4 pt-4 border-t">
+                            <p class="text-sm text-gray-600">
+                                <span class="font-semibold">Owner:</span> ${parcel.owner}
+                            </p>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            panel.classList.remove('hidden');
+        }
+
+        // ===== EVENT HANDLERS =====
+        async function handleSearch(e) {
+            e.preventDefault();
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+
+            showLoading(true);
+            showError(null);
+
+            try {
+                const results = await searchParcels(query);
+                parcels = results;
+
+                if (results.length === 0) {
+                    showError('No parcels found matching your search');
+                } else {
+                    updateMap(results);
+                }
+            } catch (err) {
+                console.error('Search error:', err);
+                showError('Failed to search parcels. Make sure the backend server is running.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function handleParcelClick(parcel) {
+            selectedParcel = parcel;
+            showLoading(true);
+
+            try {
+                const comparison = await getParcelComparison(parcel.id);
+                showComparison(comparison);
+            } catch (err) {
+                console.error('Comparison error:', err);
+                showError('Failed to load parcel comparison');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // ===== INITIALIZATION =====
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            document.getElementById('searchForm').addEventListener('submit', handleSearch);
+        });
+    </script>
+</body>
+</html>
