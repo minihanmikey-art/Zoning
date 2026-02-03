@@ -82,9 +82,40 @@ The app will be available at:
 /
 ├── client/          # React frontend
 ├── server/          # Express backend
+├── index.html       # Standalone HTML version (no build required)
 ├── docker-compose.yml
+├── railway.json     # Railway deployment config
+├── nixpacks.toml    # Nixpacks build config
 └── package.json     # Root workspace config
 ```
+
+## Quick Start (HTML Version)
+
+For the simplest setup without any build tools:
+
+1. Open `index.html` in a text editor
+2. Add your Mapbox token (line 77)
+3. Deploy backend to Railway (see DEPLOYMENT.md) OR run locally
+4. Update API_URL in index.html (line 78)
+5. Open index.html in your browser
+
+## Deployment
+
+### Deploy to Railway (Recommended)
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions.
+
+Quick steps:
+1. Push code to GitHub
+2. Sign up at https://railway.app
+3. Deploy from GitHub repo
+4. Add PostgreSQL database
+5. Copy your Railway URL
+6. Update `index.html` with your Railway URL and Mapbox token
+
+### Deploy to Render
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for Render deployment instructions.
 
 ## License
 
